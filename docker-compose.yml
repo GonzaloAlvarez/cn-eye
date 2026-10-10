@@ -1,0 +1,63 @@
+# cn-eye — motionEye for the USB camera on eye.lan (Radxa ZERO 3), the operator's
+# "on the go", offline-first host.
+#
+# Shape — deliberately NOT the ts-* sidecar archetype (README "Deviations"):
+#   * The HOST is the tailnet node (`eye`, tag:svc, host-level tailscaled with
+#     --accept-dns=false so an unreachable headscale never breaks local DNS).
+#     No sidecar, no Consul, no promtail, no exporters, no Watchtower.
+#   * Both services run network_mode: host, so their sockets go through the
+#     INPUT chain and UFW gates them: only :8765 is allowed, and only on
+#     tailscale0 (Docker-published ports would bypass UFW).
+#   * Lifecycle is camera-driven: host/90-cn-eye.rules symlinks the USB capture
+#     node to /dev/cam0 and pulls in cn-eye.service, which BindsTo the device
+#     and runs `docker compose up/down`. There is no resiliency.yml on purpose:
+#     amun-docker's boot unit + reconcile would start/heal the stack with no
+#     camera attached and fight the BindsTo lifecycle.
+#   * Nothing dials out at runtime: images are pinned by digest and pulled once
+#     by setup.sh (pull_policy: missing); no apk/apt at start, no step-ca fetch.
+services:
+  # motionEye 0.44.0 — PINNED by OCI index digest (multi-arch; arm64 here).
+  # No Watchtower on this host and none wanted: the device is offline-first,
+  # upgrades are the manual recipe in README "Upgrading" (bump tag + digest,
+  # `./setup.sh` pulls and recreates). UNPIN condition: none, by design.
+  motioneye:
+    image: ghcr.io/motioneye-project/motioneye:0.44.0@sha256:7da31d62e6c46ee8b61280f872801e429ec6f3db81bb23aca11c83863939cade
+    pull_policy: missing
+    # :8765 is the UI/API. With "Video Streaming" on, motion also binds its own
+    # MJPEG port 0.0.0.0:9081 and the control port 127.0.0.1:7999 — neither is
+    # opened in UFW; the UI fetches frames through 8765.
+    network_mode: host
+    devices:
+      # /dev/cam0 = udev symlink to whichever USB V4L2 capture node is plugged
+      # in (host/90-cn-eye.rules). Docker re-resolves the symlink at every
+      # container start, so a replug that lands on /dev/video2 still works.
+      - /dev/cam0:/dev/video0
+    volumes:
+      # motioneye.conf + motion.conf (admin password hash) + camera-1.conf.
+      # Host STATE, gitignored, not backed up: after a rebuild, set the admin
+      # password and add the camera again (README "First run").
+      - ./config:/etc/motioneye
+      # Recordings on the SD card. cn-eye.service BindsTo that mount and gates
+      # on the marker file, so an absent card never leaks onto the eMMC.
+      - ${EYE_MEDIA_DIR}:/var/lib/motioneye
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - TZ=${TZ}
+    restart: unless-stopped
+
+  # Size cap. motionEye only retains by age ("preserve movies N days"); this
+  # janitor deletes the oldest movies (+ their .thumb sidecar) whenever the
+  # media dir exceeds EYE_MAX_GB. Directory bind (not a single file) so a git
+  # pull is visible; `up -d --force-recreate --no-deps prune` picks up edits.
+  prune:
+    image: alpine:3.20
+    pull_policy: missing
+    network_mode: none
+    volumes:
+      - ${EYE_MEDIA_DIR}:/recordings
+      - ./prune:/prune:ro
+    environment:
+      - EYE_MAX_GB=${EYE_MAX_GB}
+      - EYE_PRUNE_INTERVAL=${EYE_PRUNE_INTERVAL}
+    command: ["/bin/sh", "/prune/prune.sh"]
+    restart: unless-stopped

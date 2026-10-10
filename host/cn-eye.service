@@ -1,0 +1,24 @@
+# cn-eye — rendered by setup.sh into /etc/systemd/system/cn-eye.service
+# (__REPO_DIR__, __MEDIA_DIR__, __MOUNT_UNIT__, __USER__ are substituted).
+# Started ONLY by udev (host/90-cn-eye.rules → SYSTEMD_WANTS) when a USB
+# capture camera is present; no [Install] section on purpose.
+[Unit]
+Description=cn-eye — motionEye for the USB camera (udev-triggered)
+Documentation=https://github.com/GonzaloAlvarez/cn-eye
+# Camera gone → stop. SD card unmounted → stop.
+BindsTo=dev-cam0.device __MOUNT_UNIT__
+After=dev-cam0.device docker.service network-online.target
+Requires=docker.service
+# nofail fstab entry: an absent card fails this cleanly ("dependency failed")
+# instead of recording onto the eMMC through an empty mount point.
+RequiresMountsFor=__MEDIA_DIR__
+# Marker written by setup.sh on the real volume: a foreign card skips the unit.
+ConditionPathExists=__MEDIA_DIR__/.cn-eye-volume
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=__USER__
+WorkingDirectory=__REPO_DIR__
+ExecStart=/usr/bin/docker compose -p cn-eye up -d --remove-orphans
+ExecStop=/usr/bin/docker compose -p cn-eye down

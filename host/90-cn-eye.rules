@@ -1,0 +1,8 @@
+# cn-eye: any USB V4L2 *capture* node (not the UVC metadata node, whose
+# ID_V4L_CAPABILITIES is ":") becomes /dev/cam0 and pulls in cn-eye.service.
+# The service BindsTo dev-cam0.device, so unplugging stops the stack and
+# replugging (or coldplug at boot) starts it. Runs after 60-persistent-v4l.rules,
+# which imports v4l_id (ID_V4L_CAPABILITIES). ACTION!="remove": udev-DB
+# properties persist on remove events and would re-evaluate SYSTEMD_WANTS.
+ACTION!="remove", SUBSYSTEM=="video4linux", ENV{ID_BUS}=="usb", ENV{ID_V4L_CAPABILITIES}=="*:capture:*", \
+  SYMLINK+="cam0", TAG+="systemd", ENV{SYSTEMD_WANTS}+="cn-eye.service"
