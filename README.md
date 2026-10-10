@@ -28,7 +28,7 @@ motionEye has its own login (user `admin`, password set on first run) on top of 
 | `motioneye` | `ghcr.io/motioneye-project/motioneye:0.44.0@sha256:7da31d6…` (pinned by digest) | host | UI/API on `:8765`; runs motion against `/dev/video0` (= host `/dev/cam0`); config in `./config`, media in `EYE_MEDIA_DIR` |
 | `prune` | `alpine:3.20` | none | Size cap: deletes the oldest movies (+ `.thumb`) whenever `EYE_MEDIA_DIR` exceeds `EYE_MAX_GB`; motionEye itself only retains by age |
 
-Host side, installed by `setup.sh`: `/etc/udev/rules.d/90-cn-eye.rules` (any USB V4L2 *capture* node → `/dev/cam0`, `SYSTEMD_WANTS=cn-eye.service`) and `/etc/systemd/system/cn-eye.service` (`BindsTo` the camera device and the SD mount, `RequiresMountsFor` + a marker-file condition, `docker compose up -d` / `down`). Plug → start; unplug → stop; boot with the camera attached → coldplug starts it. No `[Install]`: udev is the only trigger.
+Host side, installed by `setup.sh`: `/etc/udev/rules.d/90-cn-eye.rules` (any USB V4L2 *capture* node → `/dev/cam0`, `SYSTEMD_WANTS=cn-eye.service`) and `/etc/systemd/system/cn-eye.service` (`BindsTo` the camera device and the SD mount, `RequiresMountsFor` + a marker-file condition, `docker compose up -d` / `stop` — stopped containers keep their logs across an unplug). Plug → start; unplug → stop; boot with the camera attached → coldplug starts it. No `[Install]`: udev is the only trigger.
 
 ## Setup
 
@@ -55,7 +55,7 @@ cd ~/cn-eye
 
 1. `http://eye.ts.gn.al:8765` → user `admin`, empty password → *Settings → General → Admin Password*: set one.
 2. *Add Camera → Local V4L2 → `/dev/video0`* (`/dev/video1` may be listed too — it is the UVC metadata node, not usable).
-3. Recommended for the RK3566 (software x264; the fans are for this): *Video Device* 1280x720 @ 10 fps · *Movies* "Motion Triggered", format `mp4`, max length 300 s, preserve 30 days (the byte cap is `prune`'s job) · *Motion Detection* on · *Video Streaming* on, 5 fps, quality 50 %.
+3. Recommended for the RK3566 (software x264; the fans are for this): *Video Device* 1280x720 @ 10 fps · *Movies* "Motion Triggered", format **MP4** — *not* "MP4 (h264_v4l2m2m)", which motionEye pre-selects because ffmpeg lists that wrapper, but the vendor kernel has no V4L2 M2M encoder and no movie is ever written — max length 300 s, preserve 30 days (the byte cap is `prune`'s job) · *Motion Detection* on · *Video Streaming* on, 5 fps, quality 50 %.
 4. Apply. Wave at the camera; a movie appears under `/mnt/sd/eye/Camera1/<date>/` and in the media browser.
 
 The *Streaming URL* the UI shows (`:9081`) is motion's own MJPEG port; it is deliberately not opened in UFW (the UI gets frames through 8765). Open it only if you want the raw stream: `sudo ufw allow in on tailscale0 to any port 9081 proto tcp`.
@@ -90,6 +90,8 @@ Pinned by OCI index digest; no Watchtower on this host. Resolve the new release'
 ## Troubleshooting
 
 - *Unit inactive, camera plugged*: `journalctl -u cn-eye -b`. "Condition check" = marker `/mnt/sd/eye/.cn-eye-volume` missing (wrong/absent card → `./setup.sh`); "dependency failed" = `/mnt/sd` not mounted; `udevadm info -q property -n /dev/videoN | grep ID_V4L_CAPABILITIES` must show `:capture:`.
+- *No movies although motion is detected*: `sudo grep movie_codec config/camera-1.conf` says `mp4:h264_v4l2m2m` (or `hevc_v4l2m2m`) — switch the camera's *Movie Format* to plain **MP4**; `docker compose -p cn-eye logs motioneye` shows motion's encoder errors. All encoding here is software.
+- *Camera dropped on its own* (`journalctl -k | grep 'USB disconnect'`, often after `uvcvideo … Non-zero status (-71)` lines): a flaky hub/cable path — plug the camera straight into the board; the unit stops on unplug and restarts on replug by design.
 - *UI up, camera "Unable to open video device"*: another process holds it (`sudo fuser /dev/video0`), or the camera re-enumerated — `sudo systemctl restart cn-eye`.
 - *Not reachable from the tailnet*: `tailscale status` on eye; `headscale nodes list` on the VPS (tags `tag:svc`, online); `sudo ufw status | grep 8765`; the client must be the operator's identity (ACL `gonzaloab → tag:svc:*`).
 - *Hot*: `cat /sys/class/thermal/thermal_zone0/temp`; lower resolution/fps in the camera settings — all encoding is software (no rkmpp in Debian's ffmpeg; `/dev/mpp_service` is unused).

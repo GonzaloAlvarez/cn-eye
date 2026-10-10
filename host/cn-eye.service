@@ -21,4 +21,7 @@ RemainAfterExit=yes
 User=__USER__
 WorkingDirectory=__REPO_DIR__
 ExecStart=/usr/bin/docker compose -p cn-eye up -d --remove-orphans
-ExecStop=/usr/bin/docker compose -p cn-eye down
+# `stop`, not `down`: the containers stay (Exited) after an unplug so their logs
+# survive for debugging; the next ExecStart reuses them and Docker re-resolves
+# /dev/cam0 at start. Explicitly stopped containers are not auto-restarted.
+ExecStop=/usr/bin/docker compose -p cn-eye stop
