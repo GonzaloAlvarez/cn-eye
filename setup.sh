@@ -103,7 +103,7 @@ cat <<MSG
 cn-eye
 
   unit    : systemctl status cn-eye          ($(systemctl is-active cn-eye.service 2>/dev/null || true); starts only while a USB camera is plugged in)
-  camera  : $(readlink -f /dev/cam0 2>/dev/null || echo 'none plugged in (/dev/cam0 absent)')
+  camera  : $([ -e /dev/cam0 ] && readlink -f /dev/cam0 || echo 'none plugged in (/dev/cam0 absent)')
   stack   : docker compose -p cn-eye ps
   UI      : http://$(hostname -s).ts.gn.al:8765   (tailnet only; UFW on tailscale0)
   break-glass from the LAN: ssh -L 8765:127.0.0.1:8765 $(hostname -s).lan

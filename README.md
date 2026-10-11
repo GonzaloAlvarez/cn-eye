@@ -67,6 +67,7 @@ docker compose -p cn-eye logs -f motioneye
 sudo systemctl restart cn-eye                   # whole-stack restart (down + up)
 sudo udevadm test "$(udevadm info -q path -n /dev/video0)" 2>&1 | grep -E 'cam0|SYSTEMD_WANTS'   # rule sanity
 journalctl -u cn-eye -b                         # why it did not start: condition (marker), mount, docker
+curl -s http://127.0.0.1:7999/1/action/eventstart; sleep 10; curl -s http://127.0.0.1:7999/1/action/eventend   # force a motion event (motion control port, host-local)
 ```
 
 Deploy a change: `git pull && docker compose -p cn-eye up -d --force-recreate --no-deps <svc>` (recreate, never reload: `./prune` is a directory bind, `./config` is state). Unit/rule changes: `./setup.sh`.
@@ -96,6 +97,13 @@ Pinned by OCI index digest; no Watchtower on this host. Resolve the new release'
 - *Not reachable from the tailnet*: `tailscale status` on eye; `headscale nodes list` on the VPS (tags `tag:svc`, online); `sudo ufw status | grep 8765`; the client must be the operator's identity (ACL `gonzaloab → tag:svc:*`).
 - *Hot*: `cat /sys/class/thermal/thermal_zone0/temp`; lower resolution/fps in the camera settings — all encoding is software (no rkmpp in Debian's ffmpeg; `/dev/mpp_service` is unused).
 - *SD card full anyway*: the janitor caps only `EYE_MEDIA_DIR`; `EYE_MAX_GB` is whole GiB and must leave headroom for the filesystem.
+
+## Verified 2026-10-10 (eye, See3CAM_CU55, camera-1 at 1280x960 @ 10 fps, movies MP4/libx264)
+
+- Unplug → `cn-eye.service` stopped 11 s after the kernel's `USB disconnect`; replug → unit active again 2 s after enumeration, containers reused (logs kept).
+- Cold boot with the camera attached → unit active 19 s after kernel boot (`mnt-sd.mount`, docker, tailscaled all up first); `tailscale down`/`up` changed nothing but reachability, `/etc/resolv.conf` stayed NetworkManager's.
+- Forced event → `Camera1/<date>/19-57-10.mp4` (19.5 s, H.264 1280x960 ~10 fps, ~3.3 Mb/s) + `.thumb` on `mmcblk1p1`; SoC 38 °C idle, 43 °C while recording, load ≈ 0.4.
+- `http://eye.ts.gn.al:8765` → 200 from the Mac via cn-socksnode; `http://eye.lan:8765` from the LAN → UFW timeout; janitor oldest-first + sidecar removal proven on the device with a 500 KiB scratch cap.
 
 ## History
 
